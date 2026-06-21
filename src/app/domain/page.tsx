@@ -252,6 +252,42 @@ export default function DomainPage() {
                 </div>
               </div>
             )}
+
+            {/* Cannibalization */}
+            {summary.cannibalization.length > 0 && (
+              <div className="mt-2">
+                <p className="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-3">
+                  Kanibalizacja słów kluczowych ({summary.cannibalization.length} {summary.cannibalization.length === 1 ? 'para' : 'par'})
+                </p>
+                <div className="space-y-2">
+                  {summary.cannibalization.slice(0, 10).map((pair, i) => (
+                    <div key={i} className="border border-orange-100 bg-orange-50 rounded-lg p-2.5">
+                      <div className="flex items-center gap-2 mb-2 flex-wrap">
+                        <span className="text-xs font-bold text-orange-700 bg-orange-100 px-2 py-0.5 rounded-full">
+                          {pair.overlap}% zbieżności
+                        </span>
+                        {pair.sharedKeywords.map((kw, j) => (
+                          <span key={j} className="text-xs bg-white text-slate-600 px-1.5 py-0.5 rounded border border-orange-200">
+                            {kw}
+                          </span>
+                        ))}
+                      </div>
+                      <a href={pair.urlA} target="_blank" rel="noopener noreferrer"
+                         className="text-xs text-blue-600 hover:underline truncate block" title={pair.titleA}>
+                        ↳ {pair.urlA}
+                      </a>
+                      <a href={pair.urlB} target="_blank" rel="noopener noreferrer"
+                         className="text-xs text-blue-600 hover:underline truncate block mt-0.5" title={pair.titleB}>
+                        ↳ {pair.urlB}
+                      </a>
+                    </div>
+                  ))}
+                </div>
+                <p className="text-xs text-slate-400 mt-2">
+                  💡 Strony o wysokiej zbieżności fraz konkurują ze sobą w SERP. Rozważ scalenie treści lub przekierowanie słabszej strony na mocniejszą.
+                </p>
+              </div>
+            )}
           </div>
         )}
 

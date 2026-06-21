@@ -18,6 +18,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             <a href="/domain" className="text-slate-300 hover:text-white transition-colors">
               🌐 Audyt domeny
             </a>
+            <a href="/compare" className="text-slate-300 hover:text-white transition-colors">
+              ⚖️ Porównanie
+            </a>
           </div>
         </nav>
         {children}

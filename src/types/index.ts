@@ -151,6 +151,15 @@ export interface QuickAuditResult {
   path: string;
 }
 
+export interface CannibalizationPair {
+  urlA: string;
+  urlB: string;
+  titleA: string;
+  titleB: string;
+  overlap: number;
+  sharedKeywords: string[];
+}
+
 export interface DomainSummary {
   domain: string;
   totalUrls: number;
@@ -165,6 +174,7 @@ export interface DomainSummary {
   sections: Record<string, { count: number; avgScore: number }>;
   worstPages: { url: string; score: number; issues: string[] }[];
   bestPages:  { url: string; score: number }[];
+  cannibalization: CannibalizationPair[];
 }
 
 // ── Main result ───────────────────────────────────────────────────────────────

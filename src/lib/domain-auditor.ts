@@ -1,5 +1,5 @@
 import { load } from 'cheerio';
-import type { QuickAuditResult, DomainSummary } from '@/types';
+import type { QuickAuditResult, DomainSummary, CannibalizationPair } from '@/types';
 
 const BOT_UA = 'Mozilla/5.0 (compatible; SEOFanoutBot/1.0)';
 
@@ -178,6 +178,48 @@ export async function quickAuditPage(url: string): Promise<QuickAuditResult> {
   };
 }
 
+// ── Cannibalization detection ─────────────────────────────────────────────────
+
+const CANNIBAL_STOP = new Set([
+  'i', 'w', 'z', 'do', 'na', 'się', 'że', 'to', 'a', 'o', 'jak', 'nie',
+  'po', 'przez', 'ale', 'czy', 'tak', 'co', 'go', 'jej', 'jego', 'ich',
+  'ten', 'ta', 'te', 'są', 'być', 'jest', 'był', 'była', 'było', 'już',
+  'lub', 'dla', 'ze', 'tej', 'tego', 'przy', 'by', 'mi', 'mu', 'za', 'im',
+  'the', 'and', 'or', 'in', 'of', 'is', 'for', 'with', 'as', 'at', 'an',
+  'are', 'was', 'be', 'from', 'this', 'that', 'have', 'it', 'not', 'on',
+]);
+
+function tokenize(text: string): Set<string> {
+  return new Set(
+    (text.toLowerCase().match(/\b[a-ząęółśżźćń]{3,}\b/g) ?? [])
+      .filter(w => !CANNIBAL_STOP.has(w))
+  );
+}
+
+function detectCannibalization(results: QuickAuditResult[]): CannibalizationPair[] {
+  const pairs: CannibalizationPair[] = [];
+  for (let i = 0; i < results.length; i++) {
+    for (let j = i + 1; j < results.length; j++) {
+      const a = results[i];
+      const b = results[j];
+      const kwA = tokenize(`${a.title} ${a.h1 ?? ''}`);
+      const kwB = tokenize(`${b.title} ${b.h1 ?? ''}`);
+      const shared = [...kwA].filter(k => kwB.has(k));
+      if (shared.length < 2) continue;
+      const union = new Set([...kwA, ...kwB]);
+      const jaccard = shared.length / union.size;
+      if (jaccard < 0.4) continue;
+      pairs.push({
+        urlA: a.url, urlB: b.url,
+        titleA: a.title, titleB: b.title,
+        overlap: Math.round(jaccard * 100),
+        sharedKeywords: shared.slice(0, 6),
+      });
+    }
+  }
+  return pairs.sort((a, b) => b.overlap - a.overlap).slice(0, 20);
+}
+
 // ── Summary computation ───────────────────────────────────────────────────────
 
 export function computeSummary(domain: string, results: QuickAuditResult[], totalUrls: number): DomainSummary {
@@ -224,6 +266,7 @@ export function computeSummary(domain: string, results: QuickAuditResult[], tota
   const sorted = [...results].sort((a, b) => a.score - b.score);
   const worstPages = sorted.slice(0, 10).map(r => ({ url: r.url, score: r.score, issues: r.issues }));
   const bestPages  = [...results].sort((a, b) => b.score - a.score).slice(0, 5).map(r => ({ url: r.url, score: r.score }));
+  const cannibalization = detectCannibalization(results);
 
   return {
     domain,
@@ -239,5 +282,6 @@ export function computeSummary(domain: string, results: QuickAuditResult[], tota
     sections: sectionsOut,
     worstPages,
     bestPages,
+    cannibalization,
   };
 }
