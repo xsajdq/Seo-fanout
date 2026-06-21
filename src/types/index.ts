@@ -36,16 +36,102 @@ export interface Topic {
   score: number;
 }
 
+// ── E-E-A-T ──────────────────────────────────────────────────────────────────
+
+export interface EeatData {
+  author: {
+    detected: boolean;
+    name: string | null;
+    inSchema: boolean;
+    inHtml: boolean;
+    profileLink: string | null;
+  };
+  dates: {
+    published: string | null;
+    modified: string | null;
+  };
+  trust: {
+    about: boolean;
+    contact: boolean;
+    privacy: boolean;
+    terms: boolean;
+  };
+  nap: {
+    phone: string | null;
+    email: string | null;
+    address: string | null;
+  };
+  schemaGaps: {
+    hasFaq: boolean;
+    faqContentDetected: boolean;
+    hasHowTo: boolean;
+    howToContentDetected: boolean;
+    hasBreadcrumb: boolean;
+    hasArticle: boolean;
+    hasOrganization: boolean;
+    suggestions: string[];
+  };
+  score: number;
+}
+
+// ── Content Depth ─────────────────────────────────────────────────────────────
+
+export interface ContentDepth {
+  questionHeadings: string[];
+  hasFaqSection: boolean;
+  hasOrderedList: boolean;
+  hasUnorderedList: boolean;
+  hasTable: boolean;
+  hasBlockquote: boolean;
+  hasVideoEmbed: boolean;
+  paragraphCount: number;
+  avgParagraphWords: number;
+  score: number;
+}
+
+// ── Page Experience ───────────────────────────────────────────────────────────
+
+export interface PageExperience {
+  hasViewportMeta: boolean;
+  images: {
+    total: number;
+    modernFormat: number;
+    lazyLoaded: number;
+    withDimensions: number;
+  };
+  scripts: {
+    total: number;
+    blocking: number;
+    asyncCount: number;
+    deferCount: number;
+  };
+  hasPreload: boolean;
+  hasPreconnect: boolean;
+  score: number;
+}
+
+// ── Main result ───────────────────────────────────────────────────────────────
+
 export interface AnalysisResult {
   url: string;
   finalUrl: string;
   crawledAt: string;
   statusCode: number;
-  scores: { overall: number; technical: number; content: number };
+  scores: {
+    overall: number;
+    technical: number;
+    content: number;
+    eeat: number;
+    contentDepth: number;
+    pageExperience: number;
+  };
   technical: TechnicalData;
   keywords: Keyword[];
   entities: Entity[];
   topics: Topic[];
+  eeat: EeatData;
+  contentDepth: ContentDepth;
+  pageExperience: PageExperience;
   bodyText: string;
   headingsText: string;
 }

@@ -5,6 +5,8 @@ import type { AnalysisResult, FanoutResult } from '@/types';
 import ScoreOverview from '@/components/ScoreOverview';
 import TechnicalPanel from '@/components/TechnicalPanel';
 import EntitiesPanel from '@/components/EntitiesPanel';
+import EeatPanel from '@/components/EeatPanel';
+import ContentDepthPanel from '@/components/ContentDepthPanel';
 import KeywordsTable from '@/components/KeywordsTable';
 import FanoutPanel from '@/components/FanoutPanel';
 
@@ -183,6 +185,11 @@ export default function AnalyzePage() {
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
               <TechnicalPanel technical={analysis.technical} />
               <EntitiesPanel entities={analysis.entities} topics={analysis.topics} />
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              <EeatPanel eeat={analysis.eeat} />
+              <ContentDepthPanel contentDepth={analysis.contentDepth} pageExperience={analysis.pageExperience} />
             </div>
 
             <KeywordsTable keywords={analysis.keywords} />
