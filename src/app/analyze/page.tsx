@@ -7,6 +7,7 @@ import TechnicalPanel from '@/components/TechnicalPanel';
 import EntitiesPanel from '@/components/EntitiesPanel';
 import EeatPanel from '@/components/EeatPanel';
 import ContentDepthPanel from '@/components/ContentDepthPanel';
+import GeoPanel from '@/components/GeoPanel';
 import KeywordsTable from '@/components/KeywordsTable';
 import FanoutPanel from '@/components/FanoutPanel';
 
@@ -191,6 +192,8 @@ export default function AnalyzePage() {
               <EeatPanel eeat={analysis.eeat} />
               <ContentDepthPanel contentDepth={analysis.contentDepth} pageExperience={analysis.pageExperience} />
             </div>
+
+            <GeoPanel geo={analysis.geo} />
 
             <KeywordsTable keywords={analysis.keywords} />
 

@@ -110,6 +110,63 @@ export interface PageExperience {
   score: number;
 }
 
+// ── GEO / AEO ────────────────────────────────────────────────────────────────
+
+export interface QABlock {
+  question: string;
+  answerWords: number | null;
+  hasDirectAnswer: boolean;
+  answerPreview: string | null;
+}
+
+export interface GeoData {
+  qaBlocks: QABlock[];
+  qaCount: number;
+  qaWithDirectAnswer: number;
+  hasSummary: boolean;
+  hasStatistics: boolean;
+  statisticsDensity: number;
+  hasDefinitions: boolean;
+  hasComparisonTable: boolean;
+  firstParaWords: number;
+  score: number;
+}
+
+// ── Domain Audit ──────────────────────────────────────────────────────────────
+
+export interface QuickAuditResult {
+  url: string;
+  statusCode: number;
+  title: string;
+  h1: string | null;
+  h1Count: number;
+  wordCount: number;
+  hasMetaDesc: boolean;
+  metaDescLength: number;
+  hasSchema: boolean;
+  schemaTypes: string[];
+  internalLinks: number;
+  issues: string[];
+  score: number;
+  path: string;
+}
+
+export interface DomainSummary {
+  domain: string;
+  totalUrls: number;
+  analyzed: number;
+  avgScore: number;
+  thinContent: number;
+  noH1: number;
+  noMetaDesc: number;
+  noSchema: number;
+  multiH1: number;
+  topIssues: { issue: string; count: number }[];
+  sections: Record<string, { count: number; avgScore: number }>;
+  worstPages: { url: string; score: number; issues: string[] }[];
+  bestPages:  { url: string; score: number }[];
+}
+
 // ── Main result ───────────────────────────────────────────────────────────────
 
 export interface AnalysisResult {
@@ -124,6 +181,7 @@ export interface AnalysisResult {
     eeat: number;
     contentDepth: number;
     pageExperience: number;
+    geo: number;
   };
   technical: TechnicalData;
   keywords: Keyword[];
@@ -132,6 +190,7 @@ export interface AnalysisResult {
   eeat: EeatData;
   contentDepth: ContentDepth;
   pageExperience: PageExperience;
+  geo: GeoData;
   bodyText: string;
   headingsText: string;
 }

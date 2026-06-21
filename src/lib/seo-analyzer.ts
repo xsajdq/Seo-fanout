@@ -1,6 +1,7 @@
 import { load } from 'cheerio';
 import type { CrawlResult } from './crawler';
 import type { TechnicalData, Keyword, ContentDepth, PageExperience } from '@/types';
+import { analyzeGeo } from './geo-analyzer';
 
 const PL_STOPWORDS = new Set([
   'i', 'w', 'z', 'do', 'na', 'się', 'że', 'to', 'a', 'o', 'jak', 'nie',
@@ -250,9 +251,10 @@ export function analyzeSeo(crawl: CrawlResult) {
   if (hreflang.length > 0) content += 10;
   content = Math.min(100, content);
 
-  // ── CONTENT DEPTH & PAGE EXPERIENCE ──
-  const contentDepth    = analyzeContentDepth(html);
-  const pageExperience  = analyzePageExperience(html);
+  // ── CONTENT DEPTH, PAGE EXPERIENCE & GEO ──
+  const contentDepth   = analyzeContentDepth(html);
+  const pageExperience = analyzePageExperience(html);
+  const geo            = analyzeGeo(html, bodyText);
 
   const technicalData: TechnicalData = {
     title:           { text: titleText, length: titleText.length },
@@ -273,12 +275,19 @@ export function analyzeSeo(crawl: CrawlResult) {
   };
 
   return {
-    scores: { technical, content, contentDepth: contentDepth.score, pageExperience: pageExperience.score },
+    scores: {
+      technical,
+      content,
+      contentDepth: contentDepth.score,
+      pageExperience: pageExperience.score,
+      geo: geo.score,
+    },
     technical: technicalData,
     keywords,
     contentDepth,
     pageExperience,
-    bodyText:    bodyText.slice(0, 6000),
+    geo,
+    bodyText:     bodyText.slice(0, 6000),
     headingsText,
   };
 }
