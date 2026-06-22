@@ -42,13 +42,13 @@ export async function POST(request: NextRequest) {
       seo.bodyText.slice(0, 400),
     ].filter(Boolean).join(' ');
 
-    const gapTopic = seo.technical.title.text || seo.technical.h1[0] || '';
+    const gapTopic = seo.technical.h1[0] || seo.technical.title.text.split(/\s*[|–—]\s*/)[0].trim() || '';
     const pageHeadings = seo.technical.headings.map(h => h.text);
 
     const [entities, topics, entityGap] = await Promise.all([
       extractEntities(nlpInput, hfToken).catch(() => []),
       classifyTopics(nlpInput, hfToken).catch(() => []),
-      analyzeEntityGap(gapTopic, seo.bodyText, pageHeadings).catch(() => null),
+      analyzeEntityGap(gapTopic, seo.bodyText, pageHeadings, crawl.url).catch(() => null),
     ]);
 
     return NextResponse.json({

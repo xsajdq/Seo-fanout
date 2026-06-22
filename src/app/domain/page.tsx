@@ -191,14 +191,22 @@ export default function DomainPage() {
 
           <div className="mt-3 flex items-center gap-3">
             <label className="text-xs text-slate-500 flex-shrink-0">Maks. stron:</label>
-            <input
-              type="range" min={5} max={100} step={5}
+            <select
               value={maxPages}
               onChange={e => setMaxPages(Number(e.target.value))}
-              className="flex-1"
+              className="text-sm border border-slate-300 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
               disabled={running}
-            />
-            <span className="text-sm font-medium text-slate-700 w-10 text-right">{maxPages}</span>
+            >
+              {[30, 50, 100, 200, 500].map(n => (
+                <option key={n} value={n}>{n} stron</option>
+              ))}
+              <option value={9999}>Wszystkie (cała sitemap)</option>
+            </select>
+            {maxPages >= 200 && (
+              <span className="text-xs text-amber-600">
+                ⚠ Duże domeny mogą analizować się kilka–kilkanaście minut
+              </span>
+            )}
           </div>
         </form>
 

@@ -124,6 +124,13 @@ export async function quickAuditPage(url: string): Promise<QuickAuditResult> {
     } catch {}
   });
 
+  // Extract h2/h3 headings before DOM cleanup
+  const headings: string[] = [];
+  $('h2, h3').each((_, el) => {
+    const text = $(el).text().trim();
+    if (text) headings.push(text);
+  });
+
   // Word count (clean)
   $('script,style,nav,footer,header,aside').remove();
   const bodyText = $('body').text().replace(/\s+/g, ' ').trim();
@@ -175,7 +182,8 @@ export async function quickAuditPage(url: string): Promise<QuickAuditResult> {
     issues,
     score,
     path: urlObj.pathname,
-    bodyText: bodyText.slice(0, 3000),
+    bodyText: bodyText.slice(0, 10_000),
+    headings,
   };
 }
 

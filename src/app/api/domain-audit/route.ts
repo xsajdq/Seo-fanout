@@ -8,7 +8,7 @@ const BATCH_DELAY = 400;
 
 export async function GET(request: NextRequest) {
   const domain   = request.nextUrl.searchParams.get('domain') ?? '';
-  const maxPages = Math.min(100, Math.max(5, parseInt(request.nextUrl.searchParams.get('max') ?? '30')));
+  const maxPages = Math.max(5, parseInt(request.nextUrl.searchParams.get('max') ?? '30'));
 
   if (!domain) return new Response('Missing domain', { status: 400 });
 

@@ -150,6 +150,7 @@ export interface QuickAuditResult {
   score: number;
   path: string;
   bodyText?: string;
+  headings?: string[];
 }
 
 export interface CannibalizationPair {
