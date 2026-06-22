@@ -1,6 +1,6 @@
 import { NextRequest } from 'next/server';
 import { discoverUrls, quickAuditPage, computeSummary } from '@/lib/domain-auditor';
-import { analyzeDomainGaps } from '@/lib/entity-gap-analyzer';
+import { analyzeDomainGaps, analyzeDomainTopicGap } from '@/lib/entity-gap-analyzer';
 import type { QuickAuditResult } from '@/types';
 
 const CONCURRENCY = 3;
@@ -62,8 +62,13 @@ export async function GET(request: NextRequest) {
         const summary = computeSummary(domain, results, urls.length);
         send({ type: 'done', summary });
 
-        // Phase 2 — knowledge graph gap analysis (stream stays open)
+        // Phase 2 — per-article knowledge graph gap
         await analyzeDomainGaps(results, send);
+
+        // Phase 3 — domain topic map (missing articles across the whole domain)
+        await analyzeDomainTopicGap(results, domain, send);
+
+        send({ type: 'audit_complete' });
 
       } catch (err) {
         send({ type: 'error', message: err instanceof Error ? err.message : 'Błąd audytu domeny' });

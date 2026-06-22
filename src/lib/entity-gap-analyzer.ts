@@ -1,5 +1,5 @@
 import { findWikiTitle, getWikiLinks, getWikiCategories, getWikiSections, getWikiSummary } from './wikipedia-client';
-import type { EntityGap, WikiConcept, QuickAuditResult } from '@/types';
+import type { EntityGap, WikiConcept, QuickAuditResult, DomainTopicGap, MissingArticle } from '@/types';
 
 // ── Internal types ────────────────────────────────────────────────────────────
 
@@ -266,4 +266,136 @@ export async function analyzeDomainGaps(
   }
 
   send({ type: 'gap_complete' });
+}
+
+// ── Phase 3: domain-level topic map ──────────────────────────────────────────
+
+// Infer the domain's primary topic from URL path slugs (most reliable signal),
+// then homepage h1, then domain name.
+function inferDomainTopic(pages: QuickAuditResult[], domain: string): string {
+  const pathStops = new Set([
+    'en', 'pl', 'de', 'fr', 'blog', 'page', 'about', 'contact', 'home', 'index',
+    'uslugi', 'services', 'service', 'category', 'tag', 'autor', 'author',
+    'kursy', 'oferta', 'sklep', 'shop', 'strona', 'artykul', 'wpis',
+  ]);
+
+  // Count frequency of each slug word across all pages
+  const segFreq: Record<string, number> = {};
+  for (const p of pages) {
+    const segs = p.path.split('/').filter(Boolean);
+    for (const seg of segs) {
+      const words = seg.split('-').filter(w => w.length >= 3 && !pathStops.has(w) && !/^\d+$/.test(w));
+      for (const w of words) {
+        segFreq[w] = (segFreq[w] ?? 0) + 1;
+      }
+    }
+  }
+  const topSeg = Object.entries(segFreq).sort((a, b) => b[1] - a[1]).find(([, c]) => c >= 2);
+  if (topSeg) return topSeg[0];
+
+  // Homepage h1
+  const homepage = pages.find(p => p.path === '/' || /^\/(en|pl)?\/?(index)?$/i.test(p.path));
+  if (homepage) {
+    const t = extractTopic(homepage.title, homepage.h1, homepage.path);
+    const generic = new Set(['home', 'strona główna', 'witaj', 'main', 'index', 'welcome']);
+    if (t.length >= 5 && !generic.has(t.toLowerCase())) return t;
+  }
+
+  // Fallback: first segment of domain name
+  const raw = domain.replace(/^https?:\/\//i, '').split('.')[0];
+  return raw.replace(/[-_]/g, ' ');
+}
+
+// A page "dedicates itself" to a topic if its cleaned topic closely matches.
+function hasDedicatedPage(topic: string, pages: QuickAuditResult[]): string[] {
+  const n = norm(topic);
+  const nWords = n.split(/\s+/).filter(w => w.length > 3);
+
+  return pages.filter(p => {
+    const pageT = norm(extractTopic(p.title, p.h1, p.path));
+    const pathT  = p.path.replace(/[/_-]/g, ' ').toLowerCase();
+    if (pageT.includes(n) || n.includes(pageT)) return pageT.length >= 3;
+    if (pathT.includes(n)) return true;
+    if (nWords.length >= 2) {
+      const pWords = pageT.split(/\s+/).filter(w => w.length > 3);
+      const hits = nWords.filter(w => pWords.some(pw => pw.includes(w) || w.includes(pw))).length;
+      return hits / nWords.length >= 0.7;
+    }
+    return false;
+  }).map(p => p.url);
+}
+
+// Topic is "mentioned" if it appears in any page's body text.
+function topicMentionedIn(topic: string, pages: QuickAuditResult[]): string[] {
+  return pages
+    .filter(p => isCovered(topic, (p.bodyText ?? '').toLowerCase()))
+    .map(p => p.url)
+    .slice(0, 3);
+}
+
+export async function analyzeDomainTopicGap(
+  pages: QuickAuditResult[],
+  domain: string,
+  send: (data: unknown) => void,
+): Promise<void> {
+  const domainTopic = inferDomainTopic(pages, domain);
+
+  send({ type: 'topic_gap_status', message: `Buduję mapę tematyczną: "${domainTopic}"` });
+
+  const wiki = await fetchWikiPageData(domainTopic);
+
+  if (!wiki) {
+    send({ type: 'topic_gap_done', gap: null });
+    return;
+  }
+
+  send({ type: 'topic_gap_status', message: `Wikipedia: "${wiki.title}" · Sprawdzam pokrycie tematów domeny…` });
+
+  const h2Sections = wiki.sections.filter(s => s.level <= 2);
+  const conceptLinks = wiki.contentLinks.slice(0, 80);
+
+  const allTopics: { title: string; type: 'section' | 'concept' }[] = [
+    ...h2Sections.map(s => ({ title: s.title, type: 'section' as const })),
+    ...conceptLinks.map(l => ({ title: l, type: 'concept' as const })),
+  ];
+
+  const missingArticles: MissingArticle[] = [];
+  const thinArticles:   MissingArticle[] = [];
+  const coveredTopics:  { title: string; wikiUrl: string; coveredBy: string[] }[] = [];
+
+  for (const { title, type } of allTopics) {
+    const wikiUrl = `https://${wiki.lang}.wikipedia.org/wiki/${encodeURIComponent(title.replace(/ /g, '_'))}`;
+    const dedicated = hasDedicatedPage(title, pages);
+    const mentioned = dedicated.length === 0 ? topicMentionedIn(title, pages) : [];
+
+    if (dedicated.length > 0) {
+      coveredTopics.push({ title, wikiUrl, coveredBy: dedicated });
+    } else if (mentioned.length > 0) {
+      thinArticles.push({
+        title, wikiUrl, type, mentionedIn: mentioned,
+        priority: type === 'section' ? 'high' : 'medium',
+      });
+    } else {
+      missingArticles.push({
+        title, wikiUrl, type, mentionedIn: [],
+        priority: type === 'section' ? 'high' : 'low',
+      });
+    }
+  }
+
+  const total = allTopics.length;
+  const gap: DomainTopicGap = {
+    domainTopic,
+    wikiArticle: wiki.title,
+    wikiLang: wiki.lang,
+    wikiSummary: wiki.summary,
+    categories: wiki.categories,
+    missingArticles: missingArticles.slice(0, 30),
+    thinArticles:   thinArticles.slice(0, 20),
+    coveredTopics:  coveredTopics.slice(0, 30),
+    domainCoverageScore: total > 0 ? Math.round(coveredTopics.length / total * 100) : 0,
+    totalTopics: total,
+  };
+
+  send({ type: 'topic_gap_done', gap });
 }

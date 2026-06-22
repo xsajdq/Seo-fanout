@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useRef, useEffect } from 'react';
-import type { QuickAuditResult, DomainSummary, EntityGap } from '@/types';
+import type { QuickAuditResult, DomainSummary, EntityGap, DomainTopicGap } from '@/types';
 
 function ScoreChip({ score }: { score: number }) {
   const cls =
@@ -45,20 +45,25 @@ type SSEMessage =
   | { type: 'error'; message: string }
   | { type: 'gap_status'; message: string }
   | { type: 'gap_done'; url: string; entityGap: EntityGap }
-  | { type: 'gap_complete' };
+  | { type: 'gap_complete' }
+  | { type: 'topic_gap_status'; message: string }
+  | { type: 'topic_gap_done'; gap: DomainTopicGap | null }
+  | { type: 'audit_complete' };
 
 export default function DomainPage() {
-  const [domain, setDomain]     = useState('');
-  const [maxPages, setMaxPages] = useState(30);
-  const [running, setRunning]   = useState(false);
-  const [status, setStatus]     = useState('');
-  const [progress, setProgress] = useState(0);
-  const [pages, setPages]       = useState<QuickAuditResult[]>([]);
-  const [errors, setErrors]     = useState<{ url: string; error: string }[]>([]);
-  const [summary, setSummary]   = useState<DomainSummary | null>(null);
+  const [domain, setDomain]         = useState('');
+  const [maxPages, setMaxPages]     = useState(30);
+  const [running, setRunning]       = useState(false);
+  const [status, setStatus]         = useState('');
+  const [progress, setProgress]     = useState(0);
+  const [pages, setPages]           = useState<QuickAuditResult[]>([]);
+  const [errors, setErrors]         = useState<{ url: string; error: string }[]>([]);
+  const [summary, setSummary]       = useState<DomainSummary | null>(null);
   const [globalError, setGlobalError] = useState('');
-  const [gaps, setGaps]         = useState<Record<string, EntityGap>>({});
-  const [gapPhase, setGapPhase] = useState(false);
+  const [gaps, setGaps]             = useState<Record<string, EntityGap>>({});
+  const [gapPhase, setGapPhase]     = useState(false);
+  const [topicPhase, setTopicPhase] = useState(false);
+  const [domainTopicGap, setDomainTopicGap] = useState<DomainTopicGap | null>(null);
   const esRef = useRef<EventSource | null>(null);
 
   useEffect(() => () => { esRef.current?.close(); }, []);
@@ -75,6 +80,8 @@ export default function DomainPage() {
     setStatus('');
     setGaps({});
     setGapPhase(false);
+    setTopicPhase(false);
+    setDomainTopicGap(null);
     setRunning(true);
 
     const params = new URLSearchParams({ domain: domain.trim(), max: String(maxPages) });
@@ -100,20 +107,28 @@ export default function DomainPage() {
         setProgress(1);
         setGapPhase(true);
         setStatus('Podsumowanie gotowe — analizuję luki treści w artykułach…');
-        // Stream stays open for phase 2
       } else if (msg.type === 'gap_status') {
         setStatus(msg.message);
       } else if (msg.type === 'gap_done') {
         setGaps(g => ({ ...g, [msg.url]: msg.entityGap }));
       } else if (msg.type === 'gap_complete') {
-        setStatus('Audyt zakończony!');
         setGapPhase(false);
+        setTopicPhase(true);
+        setStatus('Buduję mapę tematyczną całej domeny…');
+      } else if (msg.type === 'topic_gap_status') {
+        setStatus(msg.message);
+      } else if (msg.type === 'topic_gap_done') {
+        setDomainTopicGap(msg.gap);
+      } else if (msg.type === 'audit_complete') {
+        setStatus('Audyt zakończony!');
+        setTopicPhase(false);
         setRunning(false);
         es.close();
       } else if (msg.type === 'error') {
         setGlobalError(msg.message);
         setRunning(false);
         setGapPhase(false);
+        setTopicPhase(false);
         es.close();
       }
     };
@@ -122,6 +137,7 @@ export default function DomainPage() {
       setGlobalError('Połączenie SSE zerwane. Sprawdź konsolę serwera.');
       setRunning(false);
       setGapPhase(false);
+      setTopicPhase(false);
       es.close();
     };
   }
@@ -130,12 +146,13 @@ export default function DomainPage() {
     esRef.current?.close();
     setRunning(false);
     setGapPhase(false);
+    setTopicPhase(false);
     setStatus('Zatrzymano przez użytkownika');
   }
 
-  // Derived data for knowledge gap section
-  const gapEntries = Object.entries(gaps);
-  const gapsSorted = gapEntries
+  // Derived data for per-article knowledge gap section
+  const gapEntries  = Object.entries(gaps);
+  const gapsSorted  = gapEntries
     .map(([url, entityGap]) => ({ url, entityGap }))
     .filter(g => g.entityGap.wikiArticle)
     .sort((a, b) => a.entityGap.coverageScore - b.entityGap.coverageScore);
@@ -151,6 +168,9 @@ export default function DomainPage() {
     .slice(0, 15)
     .filter(([, n]) => n >= 2);
 
+  // Current phase label for progress
+  const phaseLabel = topicPhase ? 'Mapa tematyczna' : gapPhase ? 'Graf wiedzy' : null;
+
   return (
     <div className="min-h-screen bg-slate-50">
       <header className="bg-white border-b border-slate-200 sticky top-0 z-10">
@@ -158,7 +178,7 @@ export default function DomainPage() {
           <a href="/analyze" className="text-slate-400 hover:text-slate-600 text-sm">← Analiza strony</a>
           <div>
             <h1 className="text-base font-bold text-slate-900 leading-none">Audyt domeny</h1>
-            <p className="text-xs text-slate-400">Crawl · SEO · Graf wiedzy Wikipedia · live progress</p>
+            <p className="text-xs text-slate-400">Crawl · SEO · Graf wiedzy · Mapa tematyczna · live progress</p>
           </div>
         </div>
       </header>
@@ -189,7 +209,7 @@ export default function DomainPage() {
             </div>
           </div>
 
-          <div className="mt-3 flex items-center gap-3">
+          <div className="mt-3 flex items-center gap-3 flex-wrap">
             <label className="text-xs text-slate-500 flex-shrink-0">Maks. stron:</label>
             <select
               value={maxPages}
@@ -204,7 +224,7 @@ export default function DomainPage() {
             </select>
             {maxPages >= 200 && (
               <span className="text-xs text-amber-600">
-                ⚠ Duże domeny mogą analizować się kilka–kilkanaście minut
+                ⚠ Duże domeny mogą zajmować kilka–kilkanaście minut
               </span>
             )}
           </div>
@@ -216,22 +236,21 @@ export default function DomainPage() {
             <div className="flex items-center justify-between mb-2">
               <p className="text-sm text-slate-600">{status}</p>
               <span className="text-xs text-slate-400">
-                {gapPhase
-                  ? `Graf wiedzy: ${gapEntries.length} przeanalizowanych`
+                {phaseLabel
+                  ? `${phaseLabel}: ${gapEntries.length} artykułów`
                   : `${Math.round(progress * 100)}%`}
               </span>
             </div>
             <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
               <div
-                className={`h-full rounded-full transition-all duration-300 ${gapPhase ? 'bg-violet-500' : 'bg-blue-500'}`}
-                style={{ width: gapPhase ? '100%' : `${progress * 100}%` }}
+                className={`h-full rounded-full transition-all duration-300 ${
+                  topicPhase ? 'bg-emerald-500' : gapPhase ? 'bg-violet-500' : 'bg-blue-500'
+                }`}
+                style={{ width: (gapPhase || topicPhase) ? '100%' : `${progress * 100}%` }}
               />
             </div>
-            {gapPhase && (
-              <p className="text-xs text-violet-500 mt-1">
-                Faza 2: analiza grafu wiedzy Wikipedia…
-              </p>
-            )}
+            {gapPhase && <p className="text-xs text-violet-500 mt-1">Faza 2: luki w artykułach Wikipedia…</p>}
+            {topicPhase && <p className="text-xs text-emerald-600 mt-1">Faza 3: mapa tematyczna domeny Wikipedia…</p>}
           </div>
         )}
 
@@ -340,7 +359,156 @@ export default function DomainPage() {
           </div>
         )}
 
-        {/* Knowledge Gap section */}
+        {/* ── Domain Topic Map (Phase 3) ─────────────────────────────────────── */}
+        {(domainTopicGap || topicPhase) && (
+          <div className="card">
+            {topicPhase && !domainTopicGap && (
+              <p className="text-sm text-slate-400 text-center py-8 animate-pulse">
+                Pobieranie mapy tematycznej z Wikipedii…
+              </p>
+            )}
+
+            {domainTopicGap && (
+              <>
+                <div className="flex items-start justify-between mb-5">
+                  <div>
+                    <h2 className="section-title mb-0">Mapa tematyczna domeny</h2>
+                    <p className="text-xs text-slate-400 mt-0.5">
+                      Główny temat wykryty:{' '}
+                      <strong className="text-slate-700">{domainTopicGap.domainTopic}</strong>
+                      {domainTopicGap.wikiArticle && (
+                        <> · Wikipedia: &ldquo;{domainTopicGap.wikiArticle}&rdquo;
+                          {domainTopicGap.wikiLang === 'en' && ' (EN)'}
+                        </>
+                      )}
+                    </p>
+                    {domainTopicGap.wikiSummary && (
+                      <p className="text-xs text-slate-400 mt-1 max-w-xl italic">
+                        {domainTopicGap.wikiSummary.slice(0, 180)}…
+                      </p>
+                    )}
+                  </div>
+                  <div className="text-right flex-shrink-0 ml-4">
+                    <div className={`text-3xl font-bold ${
+                      domainTopicGap.domainCoverageScore >= 40 ? 'text-green-600' :
+                      domainTopicGap.domainCoverageScore >= 20 ? 'text-yellow-600' : 'text-red-600'
+                    }`}>{domainTopicGap.domainCoverageScore}%</div>
+                    <div className="text-xs text-slate-400">pokrycia tematów</div>
+                    <div className="text-xs text-slate-300 mt-0.5">{domainTopicGap.totalTopics} tematów Wikipedia</div>
+                  </div>
+                </div>
+
+                {/* Stats row */}
+                <div className="grid grid-cols-3 gap-3 mb-5">
+                  {[
+                    { n: domainTopicGap.missingArticles.length, label: 'brakujących artykułów', color: 'text-red-600', bg: 'bg-red-50' },
+                    { n: domainTopicGap.thinArticles.length,    label: 'do rozbudowania',       color: 'text-amber-600', bg: 'bg-amber-50' },
+                    { n: domainTopicGap.coveredTopics.length,   label: 'pokrytych tematów',     color: 'text-green-600', bg: 'bg-green-50' },
+                  ].map((s, i) => (
+                    <div key={i} className={`${s.bg} rounded-lg p-3 text-center`}>
+                      <div className={`text-2xl font-bold ${s.color}`}>{s.n}</div>
+                      <div className="text-xs text-slate-500 mt-0.5">{s.label}</div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Missing articles – high priority (Wikipedia sections) */}
+                {domainTopicGap.missingArticles.filter(a => a.priority === 'high').length > 0 && (
+                  <div className="mb-5">
+                    <p className="text-xs font-semibold text-red-700 uppercase tracking-wide mb-2">
+                      🔴 Brakujące artykuły – wysoki priorytet (sekcje Wikipedia)
+                    </p>
+                    <p className="text-xs text-slate-400 mb-2">
+                      Wikipedia traktuje te tematy jako kluczowe podrozdziały dla „{domainTopicGap.domainTopic}". Żadna strona domeny ich nie porusza.
+                    </p>
+                    <div className="flex flex-wrap gap-2">
+                      {domainTopicGap.missingArticles.filter(a => a.priority === 'high').map((a, i) => (
+                        <a key={i} href={a.wikiUrl} target="_blank" rel="noopener noreferrer"
+                           className="inline-flex items-center gap-1.5 text-xs bg-red-50 text-red-700 border border-red-200 hover:bg-red-100 px-3 py-1.5 rounded-full transition-colors">
+                          <span className="font-medium">{a.title}</span>
+                          <span className="text-red-400 text-xs">→ napisz artykuł</span>
+                        </a>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Thin articles – mentioned but no dedicated page */}
+                {domainTopicGap.thinArticles.length > 0 && (
+                  <div className="mb-5">
+                    <p className="text-xs font-semibold text-amber-700 uppercase tracking-wide mb-2">
+                      ⚠️ Wspomniane, ale bez dedykowanego artykułu
+                    </p>
+                    <p className="text-xs text-slate-400 mb-2">
+                      Temat pojawia się w treści, ale żadna strona nie jest mu w całości poświęcona. Warto rozbudować lub napisać nowy wpis.
+                    </p>
+                    <div className="space-y-1.5">
+                      {domainTopicGap.thinArticles.map((a, i) => (
+                        <div key={i} className="flex items-center gap-2 text-xs flex-wrap">
+                          <a href={a.wikiUrl} target="_blank" rel="noopener noreferrer"
+                             className="font-medium text-amber-700 hover:underline whitespace-nowrap">
+                            {a.priority === 'high' ? '📄' : '📝'} {a.title}
+                          </a>
+                          <span className="text-slate-300">·</span>
+                          <span className="text-slate-400">wspomniane w:</span>
+                          {a.mentionedIn.map((url, j) => (
+                            <a key={j} href={url} target="_blank" rel="noopener noreferrer"
+                               className="text-blue-500 hover:underline truncate max-w-[200px]">
+                              {url.replace(/^https?:\/\/[^/]+/, '') || '/'}
+                            </a>
+                          ))}
+                          <span className="ml-auto text-amber-600 flex-shrink-0">→ rozbuduj</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Missing concepts – low priority */}
+                {domainTopicGap.missingArticles.filter(a => a.priority === 'low').length > 0 && (
+                  <details className="mb-4">
+                    <summary className="text-xs font-semibold text-slate-500 cursor-pointer hover:text-slate-700 mb-2">
+                      ⬜ Powiązane encje bez pokrycia ({domainTopicGap.missingArticles.filter(a => a.priority === 'low').length})
+                    </summary>
+                    <div className="flex flex-wrap gap-1.5 mt-2">
+                      {domainTopicGap.missingArticles.filter(a => a.priority === 'low').map((a, i) => (
+                        <a key={i} href={a.wikiUrl} target="_blank" rel="noopener noreferrer"
+                           className="text-xs text-slate-500 bg-slate-100 hover:bg-slate-200 px-2 py-0.5 rounded transition-colors">
+                          {a.title}
+                        </a>
+                      ))}
+                    </div>
+                  </details>
+                )}
+
+                {/* Covered topics */}
+                {domainTopicGap.coveredTopics.length > 0 && (
+                  <details>
+                    <summary className="text-xs font-semibold text-green-700 cursor-pointer hover:text-green-800">
+                      ✅ Pokryte tematy ({domainTopicGap.coveredTopics.length})
+                    </summary>
+                    <div className="mt-2 space-y-1">
+                      {domainTopicGap.coveredTopics.map((t, i) => (
+                        <div key={i} className="flex items-center gap-2 text-xs">
+                          <span className="font-medium text-green-700 min-w-[120px]">{t.title}</span>
+                          <span className="text-slate-300">·</span>
+                          {t.coveredBy.slice(0, 2).map((url, j) => (
+                            <a key={j} href={url} target="_blank" rel="noopener noreferrer"
+                               className="text-blue-500 hover:underline truncate max-w-[200px]">
+                              {url.replace(/^https?:\/\/[^/]+/, '') || '/'}
+                            </a>
+                          ))}
+                        </div>
+                      ))}
+                    </div>
+                  </details>
+                )}
+              </>
+            )}
+          </div>
+        )}
+
+        {/* ── Per-article knowledge gaps (Phase 2) ──────────────────────────── */}
         {(gapsSorted.length > 0 || gapPhase) && (
           <div className="card">
             <div className="flex items-center justify-between mb-4">
@@ -404,37 +572,26 @@ export default function DomainPage() {
                   </summary>
 
                   <div className="px-3 pb-3 pt-2 border-t border-slate-50 space-y-3">
-                    {/* Missing sections */}
                     {entityGap.missingSections.length > 0 && (
                       <div>
-                        <p className="text-xs font-semibold text-red-600 mb-1.5">
-                          ❌ Brakujące sekcje (vs. Wikipedia):
-                        </p>
+                        <p className="text-xs font-semibold text-red-600 mb-1.5">❌ Brakujące sekcje (vs. Wikipedia):</p>
                         <div className="flex flex-wrap gap-1.5">
                           {entityGap.missingSections.map((s, j) => (
-                            <span key={j} className="text-xs bg-red-50 text-red-700 border border-red-100 px-2 py-0.5 rounded">
-                              {s}
-                            </span>
+                            <span key={j} className="text-xs bg-red-50 text-red-700 border border-red-100 px-2 py-0.5 rounded">{s}</span>
                           ))}
                         </div>
                       </div>
                     )}
-
-                    {/* Covered sections */}
                     {entityGap.coveredSections.length > 0 && (
                       <div>
                         <p className="text-xs font-semibold text-green-700 mb-1.5">✅ Pokryte sekcje:</p>
                         <div className="flex flex-wrap gap-1.5">
                           {entityGap.coveredSections.map((s, j) => (
-                            <span key={j} className="text-xs bg-green-50 text-green-700 border border-green-100 px-2 py-0.5 rounded">
-                              {s}
-                            </span>
+                            <span key={j} className="text-xs bg-green-50 text-green-700 border border-green-100 px-2 py-0.5 rounded">{s}</span>
                           ))}
                         </div>
                       </div>
                     )}
-
-                    {/* Missing concepts */}
                     {entityGap.missingConcepts.length > 0 && (
                       <div>
                         <p className="text-xs font-semibold text-slate-500 mb-1.5">
@@ -450,14 +607,10 @@ export default function DomainPage() {
                         </div>
                       </div>
                     )}
-
-                    {/* Categories */}
                     {entityGap.categories.length > 0 && (
                       <div className="flex flex-wrap gap-1">
                         {entityGap.categories.map((cat, j) => (
-                          <span key={j} className="text-xs bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded-full">
-                            {cat}
-                          </span>
+                          <span key={j} className="text-xs bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded-full">{cat}</span>
                         ))}
                       </div>
                     )}
@@ -467,14 +620,12 @@ export default function DomainPage() {
             </div>
 
             {gapsSorted.length === 0 && gapPhase && (
-              <p className="text-sm text-slate-400 text-center py-6 animate-pulse">
-                Pobieranie danych z Wikipedii…
-              </p>
+              <p className="text-sm text-slate-400 text-center py-6 animate-pulse">Pobieranie danych z Wikipedii…</p>
             )}
           </div>
         )}
 
-        {/* Live results table */}
+        {/* ── Live results table ─────────────────────────────────────────────── */}
         {pages.length > 0 && (
           <div className="card">
             <div className="flex items-center justify-between mb-3">
@@ -521,7 +672,7 @@ export default function DomainPage() {
                         <td className="py-1.5">
                           {gap ? (
                             <CoverageChip score={gap.coverageScore} />
-                          ) : gapPhase ? (
+                          ) : (gapPhase || topicPhase) ? (
                             <span className="text-xs text-slate-300">…</span>
                           ) : null}
                         </td>
@@ -550,7 +701,7 @@ export default function DomainPage() {
             <div className="text-5xl mb-4">🌐</div>
             <p className="font-medium">Wpisz domenę, żeby rozpocząć audyt</p>
             <p className="text-sm mt-1">
-              Crawl sitemapy · SEO · Graf wiedzy Wikipedia · Kanibalizacja fraz
+              Crawl sitemapy · SEO · Luki artykułów · Mapa tematyczna domeny · Kanibalizacja
             </p>
           </div>
         )}

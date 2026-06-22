@@ -162,6 +162,27 @@ export interface CannibalizationPair {
   sharedKeywords: string[];
 }
 
+export interface MissingArticle {
+  title: string;
+  wikiUrl: string;
+  type: 'section' | 'concept';
+  mentionedIn: string[];
+  priority: 'high' | 'medium' | 'low';
+}
+
+export interface DomainTopicGap {
+  domainTopic: string;
+  wikiArticle: string | null;
+  wikiLang: 'pl' | 'en' | null;
+  wikiSummary: string;
+  categories: string[];
+  missingArticles: MissingArticle[];
+  thinArticles: MissingArticle[];
+  coveredTopics: { title: string; wikiUrl: string; coveredBy: string[] }[];
+  domainCoverageScore: number;
+  totalTopics: number;
+}
+
 export interface DomainSummary {
   domain: string;
   totalUrls: number;
