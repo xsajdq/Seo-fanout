@@ -177,6 +177,29 @@ export interface DomainSummary {
   cannibalization: CannibalizationPair[];
 }
 
+// ── Knowledge Graph / Entity Gap ──────────────────────────────────────────────
+
+export interface WikiConcept {
+  title: string;
+  covered: boolean;
+  url: string;
+}
+
+export interface EntityGap {
+  topic: string;
+  wikiArticle: string | null;
+  wikiLang: 'pl' | 'en' | null;
+  wikiSummary: string;
+  categories: string[];
+  coveredConcepts: WikiConcept[];
+  missingConcepts: WikiConcept[];
+  coverageScore: number;
+  totalConcepts: number;
+  allSections: string[];
+  coveredSections: string[];
+  missingSections: string[];
+}
+
 // ── Main result ───────────────────────────────────────────────────────────────
 
 export interface AnalysisResult {
@@ -201,6 +224,7 @@ export interface AnalysisResult {
   contentDepth: ContentDepth;
   pageExperience: PageExperience;
   geo: GeoData;
+  entityGap: EntityGap;
   bodyText: string;
   headingsText: string;
 }

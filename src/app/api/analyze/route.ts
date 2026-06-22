@@ -3,6 +3,7 @@ import { crawlUrl } from '@/lib/crawler';
 import { analyzeSeo } from '@/lib/seo-analyzer';
 import { analyzeEeat } from '@/lib/eeat-analyzer';
 import { extractEntities, classifyTopics } from '@/lib/hf-client';
+import { analyzeEntityGap } from '@/lib/entity-gap-analyzer';
 
 export async function POST(request: NextRequest) {
   let body: { url?: string; hfToken?: string };
@@ -41,9 +42,13 @@ export async function POST(request: NextRequest) {
       seo.bodyText.slice(0, 400),
     ].filter(Boolean).join(' ');
 
-    const [entities, topics] = await Promise.all([
+    const gapTopic = seo.technical.title.text || seo.technical.h1[0] || '';
+    const pageHeadings = seo.technical.headings.map(h => h.text);
+
+    const [entities, topics, entityGap] = await Promise.all([
       extractEntities(nlpInput, hfToken).catch(() => []),
       classifyTopics(nlpInput, hfToken).catch(() => []),
+      analyzeEntityGap(gapTopic, seo.bodyText, pageHeadings).catch(() => null),
     ]);
 
     return NextResponse.json({
@@ -62,6 +67,7 @@ export async function POST(request: NextRequest) {
       pageExperience: seo.pageExperience,
       geo:           seo.geo,
       eeat,
+      entityGap,
       entities,
       topics,
       bodyText:      seo.bodyText,

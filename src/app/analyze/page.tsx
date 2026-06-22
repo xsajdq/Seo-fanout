@@ -8,6 +8,7 @@ import EntitiesPanel from '@/components/EntitiesPanel';
 import EeatPanel from '@/components/EeatPanel';
 import ContentDepthPanel from '@/components/ContentDepthPanel';
 import GeoPanel from '@/components/GeoPanel';
+import KnowledgeGapPanel from '@/components/KnowledgeGapPanel';
 import KeywordsTable from '@/components/KeywordsTable';
 import FanoutPanel from '@/components/FanoutPanel';
 
@@ -194,6 +195,8 @@ export default function AnalyzePage() {
             </div>
 
             <GeoPanel geo={analysis.geo} />
+
+            <KnowledgeGapPanel gap={analysis.entityGap} />
 
             <KeywordsTable keywords={analysis.keywords} />
 
