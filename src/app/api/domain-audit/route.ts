@@ -1,5 +1,6 @@
 import { NextRequest } from 'next/server';
 import { discoverUrls, quickAuditPage, computeSummary } from '@/lib/domain-auditor';
+import { analyzeDomainGaps } from '@/lib/entity-gap-analyzer';
 import type { QuickAuditResult } from '@/types';
 
 const CONCURRENCY = 3;
@@ -44,7 +45,9 @@ export async function GET(request: NextRequest) {
             const idx = i + j + 1;
             if (r.status === 'fulfilled') {
               results.push(r.value);
-              send({ type: 'page_done', index: idx, total: urls.length, data: r.value });
+              // Strip bodyText — kept server-side for gap analysis, not sent to client
+              const { bodyText: _bt, ...pageData } = r.value;
+              send({ type: 'page_done', index: idx, total: urls.length, data: pageData });
             } else {
               send({ type: 'page_error', index: idx, total: urls.length, url: batch[j], error: String(r.reason?.message ?? 'timeout') });
             }
@@ -55,8 +58,12 @@ export async function GET(request: NextRequest) {
           }
         }
 
+        // Phase 1 complete — send summary
         const summary = computeSummary(domain, results, urls.length);
         send({ type: 'done', summary });
+
+        // Phase 2 — knowledge graph gap analysis (stream stays open)
+        await analyzeDomainGaps(results, send);
 
       } catch (err) {
         send({ type: 'error', message: err instanceof Error ? err.message : 'Błąd audytu domeny' });

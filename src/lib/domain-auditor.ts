@@ -175,6 +175,7 @@ export async function quickAuditPage(url: string): Promise<QuickAuditResult> {
     issues,
     score,
     path: urlObj.pathname,
+    bodyText: bodyText.slice(0, 3000),
   };
 }
 

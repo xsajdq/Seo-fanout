@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useRef, useEffect } from 'react';
-import type { QuickAuditResult, DomainSummary } from '@/types';
+import type { QuickAuditResult, DomainSummary, EntityGap } from '@/types';
 
 function ScoreChip({ score }: { score: number }) {
   const cls =
@@ -10,6 +10,14 @@ function ScoreChip({ score }: { score: number }) {
     score >= 25 ? 'bg-orange-100 text-orange-700' :
     'bg-red-100 text-red-600';
   return <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-bold ${cls}`}>{score}</span>;
+}
+
+function CoverageChip({ score }: { score: number }) {
+  const cls =
+    score >= 60 ? 'bg-green-100 text-green-700' :
+    score >= 30 ? 'bg-yellow-100 text-yellow-700' :
+    'bg-red-100 text-red-600';
+  return <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-bold ${cls}`}>{score}%</span>;
 }
 
 function IssueBar({ label, count, total }: { label: string; count: number; total: number }) {
@@ -34,18 +42,23 @@ type SSEMessage =
   | { type: 'page_done'; index: number; total: number; data: QuickAuditResult }
   | { type: 'page_error'; index: number; total: number; url: string; error: string }
   | { type: 'done'; summary: DomainSummary }
-  | { type: 'error'; message: string };
+  | { type: 'error'; message: string }
+  | { type: 'gap_status'; message: string }
+  | { type: 'gap_done'; url: string; entityGap: EntityGap }
+  | { type: 'gap_complete' };
 
 export default function DomainPage() {
-  const [domain, setDomain]   = useState('');
+  const [domain, setDomain]     = useState('');
   const [maxPages, setMaxPages] = useState(30);
-  const [running, setRunning] = useState(false);
-  const [status, setStatus]   = useState('');
+  const [running, setRunning]   = useState(false);
+  const [status, setStatus]     = useState('');
   const [progress, setProgress] = useState(0);
-  const [pages, setPages]     = useState<QuickAuditResult[]>([]);
-  const [errors, setErrors]   = useState<{ url: string; error: string }[]>([]);
-  const [summary, setSummary] = useState<DomainSummary | null>(null);
+  const [pages, setPages]       = useState<QuickAuditResult[]>([]);
+  const [errors, setErrors]     = useState<{ url: string; error: string }[]>([]);
+  const [summary, setSummary]   = useState<DomainSummary | null>(null);
   const [globalError, setGlobalError] = useState('');
+  const [gaps, setGaps]         = useState<Record<string, EntityGap>>({});
+  const [gapPhase, setGapPhase] = useState(false);
   const esRef = useRef<EventSource | null>(null);
 
   useEffect(() => () => { esRef.current?.close(); }, []);
@@ -54,13 +67,14 @@ export default function DomainPage() {
     e.preventDefault();
     if (!domain.trim()) return;
 
-    // Reset state
     setPages([]);
     setErrors([]);
     setSummary(null);
     setGlobalError('');
     setProgress(0);
     setStatus('');
+    setGaps({});
+    setGapPhase(false);
     setRunning(true);
 
     const params = new URLSearchParams({ domain: domain.trim(), max: String(maxPages) });
@@ -83,31 +97,59 @@ export default function DomainPage() {
         setProgress(msg.index / msg.total);
       } else if (msg.type === 'done') {
         setSummary(msg.summary);
-        setStatus('Audyt zakończony!');
         setProgress(1);
+        setGapPhase(true);
+        setStatus('Podsumowanie gotowe — analizuję luki treści w artykułach…');
+        // Stream stays open for phase 2
+      } else if (msg.type === 'gap_status') {
+        setStatus(msg.message);
+      } else if (msg.type === 'gap_done') {
+        setGaps(g => ({ ...g, [msg.url]: msg.entityGap }));
+      } else if (msg.type === 'gap_complete') {
+        setStatus('Audyt zakończony!');
+        setGapPhase(false);
         setRunning(false);
         es.close();
       } else if (msg.type === 'error') {
         setGlobalError(msg.message);
         setRunning(false);
+        setGapPhase(false);
         es.close();
       }
     };
 
     es.onerror = () => {
-      if (running) {
-        setGlobalError('Połączenie SSE zerwane. Sprawdź konsolę serwera.');
-        setRunning(false);
-        es.close();
-      }
+      setGlobalError('Połączenie SSE zerwane. Sprawdź konsolę serwera.');
+      setRunning(false);
+      setGapPhase(false);
+      es.close();
     };
   }
 
   function stopAudit() {
     esRef.current?.close();
     setRunning(false);
+    setGapPhase(false);
     setStatus('Zatrzymano przez użytkownika');
   }
+
+  // Derived data for knowledge gap section
+  const gapEntries = Object.entries(gaps);
+  const gapsSorted = gapEntries
+    .map(([url, entityGap]) => ({ url, entityGap }))
+    .filter(g => g.entityGap.wikiArticle)
+    .sort((a, b) => a.entityGap.coverageScore - b.entityGap.coverageScore);
+
+  const allMissing: Record<string, number> = {};
+  for (const { entityGap } of gapsSorted) {
+    for (const c of entityGap.missingConcepts) {
+      allMissing[c.title] = (allMissing[c.title] ?? 0) + 1;
+    }
+  }
+  const topMissing = Object.entries(allMissing)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 15)
+    .filter(([, n]) => n >= 2);
 
   return (
     <div className="min-h-screen bg-slate-50">
@@ -116,7 +158,7 @@ export default function DomainPage() {
           <a href="/analyze" className="text-slate-400 hover:text-slate-600 text-sm">← Analiza strony</a>
           <div>
             <h1 className="text-base font-bold text-slate-900 leading-none">Audyt domeny</h1>
-            <p className="text-xs text-slate-400">Crawl całej domeny przez sitemapę · live progress</p>
+            <p className="text-xs text-slate-400">Crawl · SEO · Graf wiedzy Wikipedia · live progress</p>
           </div>
         </div>
       </header>
@@ -165,14 +207,23 @@ export default function DomainPage() {
           <div className="card py-4">
             <div className="flex items-center justify-between mb-2">
               <p className="text-sm text-slate-600">{status}</p>
-              <span className="text-xs text-slate-400">{Math.round(progress * 100)}%</span>
+              <span className="text-xs text-slate-400">
+                {gapPhase
+                  ? `Graf wiedzy: ${gapEntries.length} przeanalizowanych`
+                  : `${Math.round(progress * 100)}%`}
+              </span>
             </div>
             <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
               <div
-                className="h-full bg-blue-500 rounded-full transition-all duration-300"
-                style={{ width: `${progress * 100}%` }}
+                className={`h-full rounded-full transition-all duration-300 ${gapPhase ? 'bg-violet-500' : 'bg-blue-500'}`}
+                style={{ width: gapPhase ? '100%' : `${progress * 100}%` }}
               />
             </div>
+            {gapPhase && (
+              <p className="text-xs text-violet-500 mt-1">
+                Faza 2: analiza grafu wiedzy Wikipedia…
+              </p>
+            )}
           </div>
         )}
 
@@ -202,7 +253,6 @@ export default function DomainPage() {
               ))}
             </div>
 
-            {/* Issue breakdown */}
             <div className="mb-6">
               <p className="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-3">Główne problemy</p>
               <div className="space-y-2">
@@ -214,7 +264,6 @@ export default function DomainPage() {
               </div>
             </div>
 
-            {/* Sections */}
             {Object.keys(summary.sections).length > 1 && (
               <div className="mb-6">
                 <p className="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-3">Sekcje domeny</p>
@@ -232,7 +281,6 @@ export default function DomainPage() {
               </div>
             )}
 
-            {/* Worst pages */}
             {summary.worstPages.length > 0 && (
               <div>
                 <p className="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-3">
@@ -253,9 +301,8 @@ export default function DomainPage() {
               </div>
             )}
 
-            {/* Cannibalization */}
             {summary.cannibalization.length > 0 && (
-              <div className="mt-2">
+              <div className="mt-4">
                 <p className="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-3">
                   Kanibalizacja słów kluczowych ({summary.cannibalization.length} {summary.cannibalization.length === 1 ? 'para' : 'par'})
                 </p>
@@ -267,19 +314,13 @@ export default function DomainPage() {
                           {pair.overlap}% zbieżności
                         </span>
                         {pair.sharedKeywords.map((kw, j) => (
-                          <span key={j} className="text-xs bg-white text-slate-600 px-1.5 py-0.5 rounded border border-orange-200">
-                            {kw}
-                          </span>
+                          <span key={j} className="text-xs bg-white text-slate-600 px-1.5 py-0.5 rounded border border-orange-200">{kw}</span>
                         ))}
                       </div>
                       <a href={pair.urlA} target="_blank" rel="noopener noreferrer"
-                         className="text-xs text-blue-600 hover:underline truncate block" title={pair.titleA}>
-                        ↳ {pair.urlA}
-                      </a>
+                         className="text-xs text-blue-600 hover:underline truncate block" title={pair.titleA}>↳ {pair.urlA}</a>
                       <a href={pair.urlB} target="_blank" rel="noopener noreferrer"
-                         className="text-xs text-blue-600 hover:underline truncate block mt-0.5" title={pair.titleB}>
-                        ↳ {pair.urlB}
-                      </a>
+                         className="text-xs text-blue-600 hover:underline truncate block mt-0.5" title={pair.titleB}>↳ {pair.urlB}</a>
                     </div>
                   ))}
                 </div>
@@ -287,6 +328,140 @@ export default function DomainPage() {
                   💡 Strony o wysokiej zbieżności fraz konkurują ze sobą w SERP. Rozważ scalenie treści lub przekierowanie słabszej strony na mocniejszą.
                 </p>
               </div>
+            )}
+          </div>
+        )}
+
+        {/* Knowledge Gap section */}
+        {(gapsSorted.length > 0 || gapPhase) && (
+          <div className="card">
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <h2 className="section-title mb-0">Luki treści w artykułach</h2>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  Graf wiedzy Wikipedia vs. treść każdego artykułu ·{' '}
+                  {gapsSorted.length} przeanalizowanych
+                  {gapPhase && <span className="text-violet-500"> (analizuję…)</span>}
+                </p>
+              </div>
+            </div>
+
+            {/* Aggregate: concepts missing across many pages */}
+            {topMissing.length > 0 && (
+              <div className="mb-5 p-3 bg-red-50 border border-red-100 rounded-lg">
+                <p className="text-xs font-semibold text-red-700 mb-2">
+                  🔴 Encje brakujące w wielu artykułach naraz:
+                </p>
+                <div className="flex flex-wrap gap-1.5">
+                  {topMissing.map(([concept, count]) => (
+                    <span key={concept} className="text-xs bg-red-100 text-red-700 px-2 py-0.5 rounded-full font-medium">
+                      {concept} <span className="opacity-70">({count}×)</span>
+                    </span>
+                  ))}
+                </div>
+                <p className="text-xs text-red-600 mt-2 opacity-75">
+                  Dodanie tych tematów do artykułów może znacząco poprawić pokrycie grafu wiedzy domeny.
+                </p>
+              </div>
+            )}
+
+            {/* Per-page expandable cards */}
+            <div className="space-y-2">
+              {gapsSorted.map(({ url, entityGap }, i) => (
+                <details key={i} className="border border-slate-100 rounded-lg overflow-hidden group">
+                  <summary className="flex items-center gap-3 px-3 py-2.5 cursor-pointer hover:bg-slate-50 select-none list-none">
+                    <CoverageChip score={entityGap.coverageScore} />
+                    <div className="flex-1 min-w-0">
+                      <a href={url} target="_blank" rel="noopener noreferrer"
+                         className="text-xs text-blue-600 hover:underline truncate block"
+                         onClick={e => e.stopPropagation()}>
+                        {url}
+                      </a>
+                      {entityGap.wikiArticle && (
+                        <p className="text-xs text-slate-400 truncate">
+                          Wikipedia: {entityGap.wikiArticle}
+                          {entityGap.wikiLang === 'en' && ' (EN)'}
+                        </p>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-2 flex-shrink-0 text-xs">
+                      {entityGap.missingSections.length > 0 && (
+                        <span className="text-red-500">{entityGap.missingSections.length} sekcji brakuje</span>
+                      )}
+                      {entityGap.missingConcepts.length > 0 && (
+                        <span className="text-slate-400">{entityGap.missingConcepts.length} encji brakuje</span>
+                      )}
+                      <span className="text-slate-300 group-open:rotate-180 transition-transform">▼</span>
+                    </div>
+                  </summary>
+
+                  <div className="px-3 pb-3 pt-2 border-t border-slate-50 space-y-3">
+                    {/* Missing sections */}
+                    {entityGap.missingSections.length > 0 && (
+                      <div>
+                        <p className="text-xs font-semibold text-red-600 mb-1.5">
+                          ❌ Brakujące sekcje (vs. Wikipedia):
+                        </p>
+                        <div className="flex flex-wrap gap-1.5">
+                          {entityGap.missingSections.map((s, j) => (
+                            <span key={j} className="text-xs bg-red-50 text-red-700 border border-red-100 px-2 py-0.5 rounded">
+                              {s}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Covered sections */}
+                    {entityGap.coveredSections.length > 0 && (
+                      <div>
+                        <p className="text-xs font-semibold text-green-700 mb-1.5">✅ Pokryte sekcje:</p>
+                        <div className="flex flex-wrap gap-1.5">
+                          {entityGap.coveredSections.map((s, j) => (
+                            <span key={j} className="text-xs bg-green-50 text-green-700 border border-green-100 px-2 py-0.5 rounded">
+                              {s}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Missing concepts */}
+                    {entityGap.missingConcepts.length > 0 && (
+                      <div>
+                        <p className="text-xs font-semibold text-slate-500 mb-1.5">
+                          Brakujące encje ({entityGap.missingConcepts.length}):
+                        </p>
+                        <div className="flex flex-wrap gap-1">
+                          {entityGap.missingConcepts.slice(0, 25).map((c, j) => (
+                            <a key={j} href={c.url} target="_blank" rel="noopener noreferrer"
+                               className="text-xs bg-slate-100 text-slate-600 hover:bg-red-50 hover:text-red-700 px-1.5 py-0.5 rounded transition-colors">
+                              {c.title}
+                            </a>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Categories */}
+                    {entityGap.categories.length > 0 && (
+                      <div className="flex flex-wrap gap-1">
+                        {entityGap.categories.map((cat, j) => (
+                          <span key={j} className="text-xs bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded-full">
+                            {cat}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </details>
+              ))}
+            </div>
+
+            {gapsSorted.length === 0 && gapPhase && (
+              <p className="text-sm text-slate-400 text-center py-6 animate-pulse">
+                Pobieranie danych z Wikipedii…
+              </p>
             )}
           </div>
         )}
@@ -321,7 +496,8 @@ export default function DomainPage() {
               <table className="w-full text-xs">
                 <thead>
                   <tr className="text-slate-400 border-b border-slate-100">
-                    <th className="text-left pb-2 font-medium">Wynik</th>
+                    <th className="text-left pb-2 font-medium">Wynik SEO</th>
+                    <th className="text-left pb-2 font-medium">Graf wiedzy</th>
                     <th className="text-left pb-2 font-medium">URL</th>
                     <th className="text-left pb-2 font-medium">Tytuł</th>
                     <th className="text-center pb-2 font-medium">Słów</th>
@@ -329,21 +505,31 @@ export default function DomainPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {[...pages].sort((a, b) => a.score - b.score).map((p, i) => (
-                    <tr key={i} className="border-b border-slate-50 hover:bg-slate-50">
-                      <td className="py-1.5"><ScoreChip score={p.score} /></td>
-                      <td className="py-1.5 max-w-[180px]">
-                        <a href={p.url} target="_blank" rel="noopener noreferrer"
-                           className="text-blue-600 hover:underline truncate block">{p.url}</a>
-                      </td>
-                      <td className="py-1.5 max-w-[180px] text-slate-700 truncate">{p.title || '—'}</td>
-                      <td className="py-1.5 text-center text-slate-500">{p.wordCount}</td>
-                      <td className="py-1.5 text-slate-400">
-                        {p.issues.slice(0, 2).join(' · ')}
-                        {p.issues.length > 2 && ` +${p.issues.length - 2}`}
-                      </td>
-                    </tr>
-                  ))}
+                  {[...pages].sort((a, b) => a.score - b.score).map((p, i) => {
+                    const gap = gaps[p.url];
+                    return (
+                      <tr key={i} className="border-b border-slate-50 hover:bg-slate-50">
+                        <td className="py-1.5"><ScoreChip score={p.score} /></td>
+                        <td className="py-1.5">
+                          {gap ? (
+                            <CoverageChip score={gap.coverageScore} />
+                          ) : gapPhase ? (
+                            <span className="text-xs text-slate-300">…</span>
+                          ) : null}
+                        </td>
+                        <td className="py-1.5 max-w-[160px]">
+                          <a href={p.url} target="_blank" rel="noopener noreferrer"
+                             className="text-blue-600 hover:underline truncate block">{p.url}</a>
+                        </td>
+                        <td className="py-1.5 max-w-[160px] text-slate-700 truncate">{p.title || '—'}</td>
+                        <td className="py-1.5 text-center text-slate-500">{p.wordCount}</td>
+                        <td className="py-1.5 text-slate-400">
+                          {p.issues.slice(0, 2).join(' · ')}
+                          {p.issues.length > 2 && ` +${p.issues.length - 2}`}
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -356,7 +542,7 @@ export default function DomainPage() {
             <div className="text-5xl mb-4">🌐</div>
             <p className="font-medium">Wpisz domenę, żeby rozpocząć audyt</p>
             <p className="text-sm mt-1">
-              Aplikacja crawluje sitemapę, analizuje każdą stronę i generuje zbiorczy raport
+              Crawl sitemapy · SEO · Graf wiedzy Wikipedia · Kanibalizacja fraz
             </p>
           </div>
         )}

@@ -149,6 +149,7 @@ export interface QuickAuditResult {
   issues: string[];
   score: number;
   path: string;
+  bodyText?: string;
 }
 
 export interface CannibalizationPair {
